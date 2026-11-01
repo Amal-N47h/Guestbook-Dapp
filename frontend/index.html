@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>On-Chain Guestbook</title>
+<style>
+  :root { --bg:#0f1115; --card:#181b22; --text:#e8eaf0; --muted:#8b90a0; --accent:#6c8cff; --border:#2a2e3a; }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#f5f6fa; --card:#fff; --text:#16181d; --muted:#666b7a; --accent:#3d5afe; --border:#dde0ea; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font-family: system-ui, sans-serif; }
+  main { max-width: 640px; margin: 0 auto; padding: 24px 16px; }
+  h1 { margin: 0 0 4px; }
+  .sub { color: var(--muted); margin-bottom: 20px; font-size: 14px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+  button { background: var(--accent); color: #fff; border: 0; border-radius: 8px; padding: 10px 16px; font-size: 14px; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  textarea { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 10px; font: inherit; resize: vertical; margin-bottom: 10px; }
+  .row { display:flex; justify-content: space-between; align-items:center; gap: 8px; flex-wrap: wrap; }
+  .msg { border-top: 1px solid var(--border); padding: 10px 0; }
+  .msg:first-child { border-top: 0; }
+  .meta { color: var(--muted); font-size: 12px; }
+  #status { font-size: 13px; color: var(--muted); min-height: 18px; }
+  code { font-size: 12px; word-break: break-all; }
+</style>
+</head>
+<body>
+<main>
+  <h1>On-Chain Guestbook</h1>
+  <div class="sub">Sepolia testnet · <code id="addr"></code></div>
+
+  <div class="card row">
+    <span id="account">Not connected</span>
+    <button id="connect">Connect Wallet</button>
+  </div>
+
+  <div class="card">
+    <textarea id="text" rows="3" maxlength="280" placeholder="Write a message (max 280 chars)"></textarea>
+    <div class="row">
+      <button id="post" disabled>Post Message</button>
+      <span id="status"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row"><strong>Messages (<span id="count">0</span>)</strong><button id="refresh">Refresh</button></div>
+    <div id="list"></div>
+  </div>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.umd.min.js"></script>
+<script>
+// ---- CONFIG: paste your deployed address ----
+const CONTRACT_ADDRESS = "0xc169a688C9DCb58DB3170a5D45dC543862735D03";
+const SEPOLIA_CHAIN_ID = 11155111;
+const ABI = [
+  "function postMessage(string text)",
+  "function getMessages() view returns (tuple(address author, string text, uint256 timestamp)[])",
+  "function count() view returns (uint256)"
+];
+
+const $ = (id) => document.getElementById(id);
+let provider, signer, contract;
+$("addr").textContent = CONTRACT_ADDRESS;
+
+function esc(s) { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
+function setStatus(s) { $("status").textContent = s; }
+
+async function connect() {
+  if (!window.ethereum) { alert("Install MetaMask"); return; }
+  provider = new ethers.BrowserProvider(window.ethereum);
+  await provider.send("eth_requestAccounts", []);
+  const net = await provider.getNetwork();
+  if (Number(net.chainId) !== SEPOLIA_CHAIN_ID) {
+    try {
+      await window.ethereum.request({ method: "wallet_switchEthereumChain", params: [{ chainId: "0xaa36a7" }] });
+      provider = new ethers.BrowserProvider(window.ethereum);
+    } catch (e) { setStatus("Switch to Sepolia in MetaMask"); return; }
+  }
+  signer = await provider.getSigner();
+  const a = await signer.getAddress();
+  contract = new ethers.Contract(CONTRACT_ADDRESS, ABI, signer);
+  $("account").textContent = a.slice(0, 6) + "..." + a.slice(-4);
+  $("connect").textContent = "Connected";
+  $("post").disabled = false;
+  load();
+}
+
+async function load() {
+  try {
+    const reader = contract || new ethers.Contract(CONTRACT_ADDRESS, ABI,
+      new ethers.JsonRpcProvider("https://ethereum-sepolia-rpc.publicnode.com"));
+    const msgs = await reader.getMessages();
+    $("count").textContent = msgs.length;
+    $("list").innerHTML = [...msgs].reverse().map(m => `
+      <div class="msg">
+        <div>${esc(m.text)}</div>
+        <div class="meta">${m.author.slice(0,6)}...${m.author.slice(-4)} · ${new Date(Number(m.timestamp)*1000).toLocaleString()}</div>
+      </div>`).join("") || '<div class="meta">No messages yet.</div>';
+  } catch (e) { setStatus("Load failed: " + (e.shortMessage || e.message)); }
+}
+
+async function post() {
+  const text = $("text").value.trim();
+  if (!text) return;
+  try {
+    $("post").disabled = true;
+    setStatus("Confirm in wallet...");
+    const tx = await contract.postMessage(text);
+    setStatus("Pending: " + tx.hash.slice(0, 12) + "...");
+    await tx.wait();
+    $("text").value = "";
+    setStatus("Posted ✓");
+    load();
+  } catch (e) { setStatus(e.shortMessage || e.message); }
+  finally { $("post").disabled = false; }
+}
+
+$("connect").onclick = connect;
+$("post").onclick = post;
+$("refresh").onclick = load;
+load();
+</script>
+</body>
+</html>
