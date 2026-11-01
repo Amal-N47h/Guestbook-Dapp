@@ -38,7 +38,7 @@ npx serve .        # or: python3 -m http.server 8000
 Open the printed URL, click **Connect Wallet**, write a message, click **Post Message**.
 
 ## Screenshots
-![UI](screenshots/ui.png)
+![UI](screenshots/image.png)
 
 ## Tech
 Solidity 0.8.20 · Hardhat · ethers.js 6 · MetaMask · Sepolia
